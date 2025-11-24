@@ -1,0 +1,30 @@
+cabal-version:      3.12
+name:               JuegoFinal
+version:            0.1.0.0
+license:            NONE
+author:             Luis
+maintainer:         lfhb2804@gmail.com
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+executable juego_haskell
+    import:           warnings
+
+    main-is:          Main.hs
+
+    other-modules:    Juego
+
+    build-depends:
+        base ^>=4.18.3.0,
+        containers,
+        aeson,
+        split,
+        bytestring,
+        random
+
+    hs-source-dirs:   .
+
+    default-language: Haskell2010
