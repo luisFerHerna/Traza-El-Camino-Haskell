@@ -1,6 +1,6 @@
 # 🚗 Lleva al Coche a Casa (Haskell + Python/Pygame)
 
-![Estado del Proyecto](https://img.shields.io/badge/Estado-En_Desarrollo-yellow)
+![Estado del Proyecto](https://img.shields.io/badge/Estado-Finalizado-Verde)
 ![Haskell](https://img.shields.io/badge/Backend-Haskell-purple)
 ![Python](https://img.shields.io/badge/Frontend-Python%20%7C%20Pygame-blue)
 
