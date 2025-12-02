@@ -4,257 +4,352 @@ import json
 import sys
 import os
 
-# GitHub Copilot
-# Archivo cliente en Python que actúa como interfaz gráfica del juego.
-# Se comunica con el ejecutable Haskell (proceso hijo) mediante stdin/stdout
-# para recibir el estado lógico del juego en JSON y enviar comandos (TICK, DIBUJAR, etc).
+HASKELL_EXECUTABLE = './juego_haskell'
+ANCHO_VENTANA, ALTO_VENTANA = 800, 600
+TAMANO_CELDA = 25
+DURACION_FRAME = 80
+VELOCIDAD_CAIDA = 9
 
-HASKELL_EXECUTABLE = './juego_haskell'  # Ejecutable Haskell que contiene la lógica del juego
-ANCHO_VENTANA, ALTO_VENTANA = 700, 500   # Tamaño de la ventana Pygame
-TAMANO_CELDA = 20                        # Tamaño en píxeles de cada celda del "mapa" lógico
-DURACION_FRAME = 80                      # Milisegundos entre frames de animación lógica
-VELOCIDAD_CAIDA = 8                      # Velocidad en píxeles por frame para la animación de caída
+COLOR_FONDO = (100, 215, 120)
+COLOR_CAMINO = (80, 80, 90)
+COLOR_UI_BG = (0, 0, 0, 150)
+COLOR_HITBOX_OBS = (255, 50, 50, 60)
+COLOR_HITBOX_META = (50, 50, 255, 60)
 
 pygame.init()
+pygame.mixer.init()
+
 pantalla = pygame.display.set_mode((ANCHO_VENTANA, ALTO_VENTANA))
-pygame.display.set_caption("Traza el camino - Versión Final")
-reloj = pygame.time.Clock()  # Reloj para controlar FPS y medir dt
+pygame.display.set_caption("LLEVA AL COCHE A CASA 🚗🏡")
+reloj = pygame.time.Clock()
 
-# Recursos gráficos (sprites)
-sprites_coche = []    # Lista de frames para el coche (si existe frames.png)
-imagen_casa = None    # Imagen de la meta/casa (si existe casa.png)
+sprites_coche = []
+imagen_casa = None
+imagen_obstaculo = None
+imagen_corazon = None
+sonidos = {}
 
-try:
-    # Intentar cargar hoja de sprites para el coche (4 frames en horizontal)
-    if os.path.exists('frames.png'):
-        hoja = pygame.image.load('frames.png').convert_alpha()
-        ancho_frame = hoja.get_width() // 4
-        alto_hoja = hoja.get_height()
-        for i in range(4):
-            rect = pygame.Rect(i * ancho_frame, 0, ancho_frame, alto_hoja)
-            frame = hoja.subsurface(rect)
-            # Escalar a un tamaño relativo a la celda para que se vea bien
-            frame = pygame.transform.scale(frame, (TAMANO_CELDA + 12, TAMANO_CELDA + 12))
-            sprites_coche.append(frame)
+def cargar_recursos():
+    global imagen_casa, imagen_obstaculo, imagen_corazon
+    try:
+        if os.path.exists('frames.png'):
+            hoja = pygame.image.load('frames.png').convert_alpha()
+            ancho_frame = hoja.get_width() // 4
+            alto_hoja = hoja.get_height()
+            for i in range(4):
+                rect = pygame.Rect(i * ancho_frame, 0, ancho_frame, alto_hoja)
+                frame = hoja.subsurface(rect)
+                frame = pygame.transform.scale(frame, (int(TAMANO_CELDA * 2.5), int(TAMANO_CELDA * 2.5)))
+                sprites_coche.append(frame)
 
-    # Intentar cargar imagen de la casa/meta
-    if os.path.exists('casa.png'):
-        img_casa = pygame.image.load('casa.png').convert_alpha()
-        imagen_casa = pygame.transform.scale(img_casa, (TAMANO_CELDA + 15, TAMANO_CELDA + 15))
+        if os.path.exists('casa.png'):
+            img = pygame.image.load('casa.png').convert_alpha()
+            imagen_casa = pygame.transform.scale(img, (int(TAMANO_CELDA * 4.0), int(TAMANO_CELDA * 4.0)))
 
-except Exception as e:
-    # Si falla cargar imágenes, no es crítico: se usan dibujos simples en su lugar
-    print(f"Advertencia cargando imágenes: {e}")
+        if os.path.exists('obstaculo.png'):
+            img = pygame.image.load('obstaculo.png').convert_alpha()
+            imagen_obstaculo = pygame.transform.scale(img, (int(TAMANO_CELDA * 2.0), int(TAMANO_CELDA * 2.0)))
 
+        if os.path.exists('corazon.png'):
+            img = pygame.image.load('corazon.png').convert_alpha()
+            imagen_corazon = pygame.transform.scale(img, (35, 35))
+
+        lista_sonidos = {
+            'ambientacion': 'ambientacion.mp3',
+            'caida': 'caida.mp3',
+            'victoria': 'victoria.mp3',
+            'perder': 'perder.mp3',
+            'choque': 'choque.mp3'
+        }
+        for nombre, archivo in lista_sonidos.items():
+            if os.path.exists(archivo):
+                sonidos[nombre] = pygame.mixer.Sound(archivo)
+                if nombre == 'ambientacion':
+                    sonidos[nombre].set_volume(0.4)
+                if nombre == 'victoria':
+                    sonidos[nombre].set_volume(0.6)
+    except Exception as e:
+        print(f"Nota: {e}")
+
+cargar_recursos()
+
+if 'ambientacion' in sonidos:
+    sonidos['ambientacion'].play(loops=-1)
+
+def dibujar_hitbox_obstaculos(pantalla, obstaculos, meta):
+    hitbox_surf = pygame.Surface((ANCHO_VENTANA, ALTO_VENTANA), pygame.SRCALPHA)
+    radio_hitbox = TAMANO_CELDA * 2 + (TAMANO_CELDA // 2)
+
+    for (ox, oy) in obstaculos:
+        center_x = ox * TAMANO_CELDA + TAMANO_CELDA // 2
+        center_y = oy * TAMANO_CELDA + TAMANO_CELDA // 2
+        pygame.draw.circle(hitbox_surf, COLOR_HITBOX_OBS, (center_x, center_y), radio_hitbox)
+
+    if meta:
+        center_x = meta[0] * TAMANO_CELDA + TAMANO_CELDA // 2
+        center_y = meta[1] * TAMANO_CELDA + TAMANO_CELDA // 2
+        pygame.draw.circle(hitbox_surf, COLOR_HITBOX_META, (center_x, center_y), radio_hitbox)
+
+    pantalla.blit(hitbox_surf, (0, 0))
 
 def dibujar_juego(estado_juego, frame_actual, offset_caida_y, juego_terminado_visualmente):
-    """
-    Dibuja en pantalla el estado recibido desde Haskell.
-    - estado_juego: diccionario con claves como 'caminoDibujado', 'metaPos', 'cochePos', 'angulo', 'estado'
-    - frame_actual: índice de animación (para elegir sprite)
-    - offset_caida_y: desplazamiento vertical aplicado al coche durante animación de caída
-    - juego_terminado_visualmente: booleano que indica si la animación finalizó
-    """
-    pantalla.fill((255, 255, 255))  # Fondo blanco
+    pantalla.fill(COLOR_FONDO)
 
-    # Dibujar los bloques del camino trazado por el jugador
     camino = estado_juego.get('caminoDibujado', [])
     for (cx, cy) in camino:
-        pygame.draw.rect(pantalla, (80, 80, 80),
-                        (cx*TAMANO_CELDA, cy*TAMANO_CELDA, TAMANO_CELDA, TAMANO_CELDA))
+        rect = pygame.Rect(cx*TAMANO_CELDA, cy*TAMANO_CELDA, TAMANO_CELDA, TAMANO_CELDA)
+        pygame.draw.rect(pantalla, COLOR_CAMINO, rect, border_radius=5)
+        pygame.draw.rect(pantalla, (100, 100, 110), rect, width=1, border_radius=5)
 
-    # Dibujar la meta (casa) si existe
+    obstaculos = estado_juego.get('obstaculos', [])
     meta = estado_juego.get('metaPos')
+    dibujar_hitbox_obstaculos(pantalla, obstaculos, meta)
+
+    for (ox, oy) in obstaculos:
+        center_x = ox * TAMANO_CELDA + TAMANO_CELDA // 2
+        center_y = oy * TAMANO_CELDA + TAMANO_CELDA // 2
+        if imagen_obstaculo:
+            rect_img = imagen_obstaculo.get_rect(center=(center_x, center_y))
+            pantalla.blit(imagen_obstaculo, rect_img.topleft)
+        else:
+            pygame.draw.circle(pantalla, (200, 50, 50), (center_x, center_y), TAMANO_CELDA//2)
+            pygame.draw.circle(pantalla, (100, 0, 0), (center_x, center_y), TAMANO_CELDA//2, width=2)
+
     if meta:
         rx, ry = meta
-        coord_x = rx * TAMANO_CELDA
-        coord_y = ry * TAMANO_CELDA
-
+        center_x = rx * TAMANO_CELDA + TAMANO_CELDA // 2
+        center_y = ry * TAMANO_CELDA + TAMANO_CELDA // 2
         if imagen_casa:
-            # Si hay sprite, centrar la imagen en la celda
-            rect_casa = imagen_casa.get_rect(center=(coord_x + TAMANO_CELDA//2, coord_y + TAMANO_CELDA//2))
+            rect_casa = imagen_casa.get_rect(center=(center_x, center_y - (imagen_casa.get_height()//3)))
             pantalla.blit(imagen_casa, rect_casa.topleft)
         else:
-            # Dibujar un rectángulo verde como fallback
-            pygame.draw.rect(pantalla, (0, 200, 0), (coord_x, coord_y, TAMANO_CELDA, TAMANO_CELDA))
+            pygame.draw.rect(pantalla, (0, 200, 0), (rx*TAMANO_CELDA, ry*TAMANO_CELDA, TAMANO_CELDA, TAMANO_CELDA))
 
-    # Posición y orientación del coche desde el estado lógico
     coche_pos = estado_juego.get('cochePos', [0, 0])
     curr_x, curr_y = coche_pos
     angulo = estado_juego.get('angulo', 0.0)
 
-    # Coordenadas de dibujo en píxeles; aplicar offset vertical si está cayendo
     visual_y = (curr_y * TAMANO_CELDA) + offset_caida_y
     visual_x = (curr_x * TAMANO_CELDA)
+    center_v_x = visual_x + TAMANO_CELDA // 2
+    center_v_y = visual_y + TAMANO_CELDA // 2
 
     if sprites_coche:
-        # Usar sprites animados si están disponibles; rotar según ángulo lógico
         idx = int(frame_actual) % 4
         imagen_rotada = pygame.transform.rotate(sprites_coche[idx], -angulo)
-        rect = imagen_rotada.get_rect(center=(visual_x + TAMANO_CELDA//2,
-                                              visual_y + TAMANO_CELDA//2))
+        rect = imagen_rotada.get_rect(center=(center_v_x, center_v_y))
+        if offset_caida_y == 0:
+            sombra = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.ellipse(sombra, (0, 0, 0, 60), sombra.get_rect())
+            pantalla.blit(sombra, (rect.x + 5, rect.y + 10))
         pantalla.blit(imagen_rotada, rect.topleft)
     else:
-        # Dibujo simple como fallback: círculo azul que representa el coche
-        rect = pygame.Rect(visual_x, visual_y, TAMANO_CELDA, TAMANO_CELDA)
-        pygame.draw.circle(pantalla, (0, 0, 255), rect.center, TAMANO_CELDA // 2)
+        pygame.draw.circle(pantalla, (0, 0, 255), (center_v_x, center_v_y), TAMANO_CELDA // 2)
 
-    # Mostrar mensaje de estado (instrucciones o resultado)
+    s = pygame.Surface((ANCHO_VENTANA, 50))
+    s.set_alpha(180)
+    s.fill((0,0,0))
+    pantalla.blit(s, (0,0))
+
+    vidas = estado_juego.get('vidas', 3)
+    nivel = estado_juego.get('nivelActual', 1)
+    font = pygame.font.SysFont("Arial", 24, bold=True)
+
+    for i in range(vidas):
+        if imagen_corazon:
+            pantalla.blit(imagen_corazon, (20 + i * 40, 8))
+        else:
+            txt_vida = font.render("♥", True, (255, 50, 50))
+            pantalla.blit(txt_vida, (20 + i * 30, 10))
+
+    txt_nivel = font.render(f"NIVEL {nivel}", True, (255, 255, 255))
+    rect_nivel = txt_nivel.get_rect(midright=(ANCHO_VENTANA - 20, 25))
+    pantalla.blit(txt_nivel, rect_nivel)
+
     estado_logico = estado_juego.get('estado', '')
-    font = pygame.font.SysFont("Arial", 22, bold=True)
     msg = ""
-    col = (0,0,0)
+    col = (255, 255, 255)
+    bg_msg = None
 
     if estado_logico == 'Dibujando':
-        msg = "Click en el coche y arrastra hacia la casa"
-        col = (50, 50, 50)
+        msg = "DIBUJA EL CAMINO"
+        col = (255, 255, 255)
     elif estado_logico == 'Ganado':
-        msg = "¡LLEGASTE A CASA! [R] Nuevo Nivel"
-        col = (0, 150, 0)
-    elif estado_logico == 'Caido':
-        # Mostrar mensaje distinto si la animación de caída ya se completó visualmente
         if juego_terminado_visualmente:
-            msg = "¡Te caíste al vacío! [R] Reintentar"
-            col = (200, 0, 0)
-        else:
-            msg = "¡Cayendooooo...!"
-            col = (200, 100, 0)
+            msg = "¡NIVEL COMPLETADO! [ESPACIO] Continuar"
+            col = (100, 255, 100)
+            bg_msg = (0, 0, 0, 200)
+    elif estado_logico == 'Caido' or estado_logico == 'Chocado':
+        if juego_terminado_visualmente:
+            msg = "¡NO HAS PODIDO LLEGAR! [ESPACIO] Reintentar"
+            col = (255, 100, 100)
+            bg_msg = (0, 0, 0, 200)
+    elif estado_logico == 'GameOver':
+        overlay = pygame.Surface((ANCHO_VENTANA, ALTO_VENTANA), pygame.SRCALPHA)
+        overlay.fill((50, 0, 0, 220))
+        pantalla.blit(overlay, (0,0))
+        font_go = pygame.font.SysFont("Arial", 60, bold=True)
+        txt_go = font_go.render("GAME OVER", True, (255, 255, 255))
+        pantalla.blit(txt_go, txt_go.get_rect(center=(ANCHO_VENTANA//2, ALTO_VENTANA//2 - 40)))
+        font_sub = pygame.font.SysFont("Arial", 30)
+        txt_sub = font_sub.render("Presiona [R] para reiniciar todo", True, (200, 200, 200))
+        pantalla.blit(txt_sub, txt_sub.get_rect(center=(ANCHO_VENTANA//2, ALTO_VENTANA//2 + 40)))
+        pygame.display.flip()
+        return
 
     if msg:
-        pantalla.blit(font.render(msg, True, col), (10, 10))
+        font_msg = pygame.font.SysFont("Arial", 28, bold=True)
+        texto_render = font_msg.render(msg, True, col)
+        if bg_msg:
+            padding = 20
+            bg_rect = texto_render.get_rect(center=(ANCHO_VENTANA//2, ALTO_VENTANA - 50))
+            bg_rect.inflate_ip(padding*2, padding)
+            shape_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+            shape_surf.fill(bg_msg)
+            pantalla.blit(shape_surf, bg_rect.topleft)
+        rect_msg = texto_render.get_rect(center=(ANCHO_VENTANA//2, ALTO_VENTANA - 50))
+        pantalla.blit(texto_render, rect_msg)
 
-    pygame.display.flip()  # Actualizar pantalla completa
-
+    pygame.display.flip()
 
 def main():
-    # Ejecuta el proceso Haskell y gestiona la UI/Juego
     proc = None
 
     def iniciar_haskell():
-        """
-        Inicia el ejecutable Haskell como proceso hijo con pipes para stdin/stdout.
-        Envía un primer TICK para solicitar el estado inicial y lee la respuesta JSON.
-        Devuelve (process, estado_inicial_dict) o (None, None) en caso de error.
-        """
         try:
             p = subprocess.Popen([HASKELL_EXECUTABLE], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=0)
-            # Pedir un estado inicial sincronizando con un comando TICK
             p.stdin.write("TICK\n")
             return p, json.loads(p.stdout.readline())
-        except:
-            return None, None
+        except: return None, None
 
     proc, estado_actual = iniciar_haskell()
     if not proc:
-        print("Error: Asegúrate de haber compilado Haskell.")
+        print("Error: Compila Haskell primero.")
         return
 
-    # Variables de control de la interfaz
     corriendo = True
-    dibujando = False                # True mientras el usuario arrastra para dibujar el camino
-    indice_animacion = 0             # Contador de frames para animación del coche
+    dibujando = False
+    indice_animacion = 0
     acumulador_tiempo = 0
 
-    animando_caida = False           # Cuando el coche está en animación de caída
-    offset_caida_y = 0               # Desplazamiento vertical acumulado durante la caída
-    juego_terminado_visualmente = False  # True cuando la animación final de caída terminó
+    animando_caida = False
+    offset_caida_y = 0
+    juego_terminado_visualmente = False
+    estado_anterior = ""
 
     while corriendo:
-        dt = reloj.tick(60)  # dt en ms desde el último frame (limita a ~60 FPS)
+        dt = reloj.tick(60)
+        estado_logico = estado_actual.get('estado')
 
-        # Manejo de eventos de Pygame (entrada del usuario)
+        if estado_logico != estado_anterior:
+            if estado_logico == 'Caido' and 'caida' in sonidos:
+                sonidos['caida'].play()
+            elif estado_logico == 'Chocado' and 'choque' in sonidos:
+                sonidos['choque'].play()
+            elif estado_logico == 'Ganado' and 'victoria' in sonidos:
+                sonidos['victoria'].play()
+            elif estado_logico == 'GameOver' and 'perder' in sonidos:
+                sonidos['perder'].play()
+            estado_anterior = estado_logico
+
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 corriendo = False
+            elif evento.type == pygame.KEYDOWN:
+                if evento.key == pygame.K_r:
+                     try:
+                        proc.stdin.write("REINICIAR_COMPLETO\n")
+                        estado_actual = json.loads(proc.stdout.readline())
+                        animando_caida = False
+                        offset_caida_y = 0
+                        juego_terminado_visualmente = False
+                        estado_anterior = ""
+                        estado_logico = estado_actual.get('estado') # ACTUALIZAR AQUI TAMBIEN
+                     except: corriendo = False
 
-            elif evento.type == pygame.KEYDOWN and evento.key == pygame.K_r:
-                # Reiniciar juego: terminar proceso viejo e iniciar uno nuevo
-                try: proc.terminate()
-                except: pass
-                proc, estado_actual = iniciar_haskell()
-                if not proc: corriendo = False
-                dibujando = False
-                indice_animacion = 0
-                animando_caida = False
-                offset_caida_y = 0
-                juego_terminado_visualmente = False
+                elif evento.key == pygame.K_SPACE:
+                    if juego_terminado_visualmente:
+                        try:
+                            animando_caida = False
+                            offset_caida_y = 0
+                            juego_terminado_visualmente = False
+                            dibujando = False
+                            estado_anterior = ""
 
-            elif evento.type == pygame.MOUSEBUTTONDOWN and not animando_caida:
-                # Empezar a dibujar solo si el estado lógico permite 'Dibujando'
-                if estado_actual.get('estado') == 'Dibujando':
+                            if estado_logico == 'Ganado':
+                                proc.stdin.write("SIGUIENTE_NIVEL\n")
+                            elif estado_logico in ['Caido', 'Chocado']:
+                                proc.stdin.write("REINTENTAR_O_PERDER\n")
+
+                            estado_actual = json.loads(proc.stdout.readline())
+
+                            # --- CORRECCIÓN CRÍTICA ---
+                            # Actualizamos 'estado_logico' inmediatamente con el nuevo estado ('Dibujando')
+                            # para que la lógica de abajo NO piense que seguimos chocados/caídos.
+                            estado_logico = estado_actual.get('estado')
+
+                        except: corriendo = False
+
+            elif evento.type == pygame.MOUSEBUTTONDOWN:
+                if estado_logico == 'Dibujando' and not animando_caida:
                     dibujando = True
                     try:
-                        # Resetear el path en la lógica y enviar la primera coordenada
                         proc.stdin.write("RESET_PATH\n")
-                        proc.stdout.readline()  # consumir respuesta de confirmación
+                        proc.stdout.readline()
                         mx, my = pygame.mouse.get_pos()
                         proc.stdin.write(f"DIBUJAR {mx//TAMANO_CELDA} {my//TAMANO_CELDA}\n")
                         estado_actual = json.loads(proc.stdout.readline())
-                    except:
-                        corriendo = False
+                    except: corriendo = False
 
             elif evento.type == pygame.MOUSEBUTTONUP and dibujando:
-                # Cuando se suelta el botón, enviar INICIAR para que el coche comience
                 dibujando = False
                 try:
                     proc.stdin.write("INICIAR\n")
                     estado_actual = json.loads(proc.stdout.readline())
-                except:
-                    corriendo = False
+                except: corriendo = False
 
-        # Lógica principal: actualizar estado comunicándose con Haskell según el estado lógico
         try:
-            estado_logico = estado_actual.get('estado')
-
             if dibujando and estado_logico == 'Dibujando':
-                # Mientras arrastra, enviar coordenadas continuamente
                 mx, my = pygame.mouse.get_pos()
                 proc.stdin.write(f"DIBUJAR {mx//TAMANO_CELDA} {my//TAMANO_CELDA}\n")
                 estado_actual = json.loads(proc.stdout.readline())
 
             elif estado_logico == 'EnCurso':
-                # Durante el curso del movimiento, animar localmente y cada 4 frames pedir TICK
                 acumulador_tiempo += dt
                 if acumulador_tiempo >= DURACION_FRAME:
                     acumulador_tiempo = 0
                     indice_animacion += 1
-                    # Cada 4 incrementos de índice animación (esto sincroniza lógica vs sprite)
                     if indice_animacion % 4 == 0:
                         proc.stdin.write("TICK\n")
                         estado_actual = json.loads(proc.stdout.readline())
 
-            elif estado_logico == 'Caido' and not animando_caida and not juego_terminado_visualmente:
-                # Cuando la lógica informa que cayó, empezar animación de caída visual
-                animando_caida = True
+            elif estado_logico in ['Caido', 'Chocado', 'Ganado']:
+                if estado_logico == 'Ganado' and not juego_terminado_visualmente:
+                    juego_terminado_visualmente = True
+
+                elif estado_logico in ['Caido', 'Chocado'] and not animando_caida and not juego_terminado_visualmente:
+                    animando_caida = True
 
             if animando_caida:
-                # Animación de caída: acumular tiempo, aumentar offset y actualizar índice animación
                 acumulador_tiempo += dt
                 if acumulador_tiempo >= DURACION_FRAME:
                     acumulador_tiempo = 0
                     indice_animacion += 1
 
                 offset_caida_y += VELOCIDAD_CAIDA
-
-                # Cuando el coche sale de la pantalla por abajo, considerar la animación completa
                 coche_y_pixeles = estado_actual.get('cochePos')[1] * TAMANO_CELDA
                 if coche_y_pixeles + offset_caida_y > ALTO_VENTANA + 50:
                     animando_caida = False
                     juego_terminado_visualmente = True
 
-        except Exception as e:
-            # Problema en comunicación con el proceso Haskell: salir y avisar
-            print(f"Error de comunicación: {e}")
+        except Exception:
             corriendo = False
 
-        # Dibujar estado actual (si hay un estado)
         dibujar_juego(estado_actual, indice_animacion, offset_caida_y, juego_terminado_visualmente)
 
-    # Al salir, intentar terminar el proceso hijo y cerrar Pygame
     try: proc.terminate()
     except: pass
     pygame.quit()
-
 
 if __name__ == '__main__':
     main()
