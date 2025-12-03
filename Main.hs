@@ -9,98 +9,105 @@ import Data.List.Split (splitOn)
 import System.Random (randomRIO)
 import Text.Read (readMaybe)
 
--- Función principal que inicia el juego
 main :: IO ()
 main = do
-    hSetBuffering stdout LineBuffering  -- Configura el modo de buffering de salida
-    juegoInicial <- generarNivel 1 3  -- Genera el nivel inicial con 3 vidas
-    loop juegoInicial  -- Inicia el bucle del juego
+    hSetBuffering stdout LineBuffering
+    -- Iniciamos Nivel 1 con 3 vidas
+    juegoInicial <- generarNivel 1 3
+    loop juegoInicial
 
--- Genera un nuevo nivel con posiciones aleatorias para el coche y la meta
+-- Genera un nuevo estado de juego con posiciones aleatorias y obstaculos
 generarNivel :: Int -> Int -> IO Juego
 generarNivel nNivel nVidas = do
-    inicioX <- randomRIO (3, 5)   :: IO Int  -- Genera posición X inicial aleatoria
-    inicioY <- randomRIO (3, 18)  :: IO Int  -- Genera posición Y inicial aleatoria
-    metaX   <- randomRIO (28, 30) :: IO Int  -- Genera posición X de la meta aleatoria
-    metaY   <- randomRIO (3, 18)  :: IO Int  -- Genera posición Y de la meta aleatoria
+    -- Coordenadas Inicio y Meta (RANGOS AJUSTADOS para evitar bordes)
+    inicioX <- randomRIO (3, 5)   :: IO Int
+    inicioY <- randomRIO (3, 18)  :: IO Int
+    metaX   <- randomRIO (28, 30) :: IO Int
+    metaY   <- randomRIO (3, 18)  :: IO Int
 
-    let inicio = (inicioX, inicioY)  -- Crea la coordenada inicial
-    let meta = (metaX, metaY)  -- Crea la coordenada de la meta
+    let inicio = (inicioX, inicioY)
+    let meta = (metaX, metaY)
 
-    let numObstaculos = if nNivel == 1 then 0 else (nNivel - 1) * 3  -- Calcula el número de obstáculos
+    -- Calcular número de obstáculos: Nivel 1 = 0, Nivel 2 = 3, Nivel 3 = 6...
+    let numObstaculos = if nNivel == 1 then 0 else (nNivel - 1) * 3
 
-    obs <- generarObstaculos numObstaculos inicio meta []  -- Genera las posiciones de los obstáculos
+    -- Generar obstaculos que no caigan en inicio ni meta
+    obs <- generarObstaculos numObstaculos inicio meta []
 
-    return $ crearJuego inicio meta obs nVidas nNivel  -- Crea y devuelve el juego
+    return $ crearJuego inicio meta obs nVidas nNivel
 
--- Genera una lista de obstáculos aleatorios
+-- Función recursiva para generar coordenadas únicas
 generarObstaculos :: Int -> Coord -> Coord -> [Coord] -> IO [Coord]
-generarObstaculos 0 _ _ acc = return acc  -- Si no quedan obstáculos por generar, devuelve la lista acumulada
+generarObstaculos 0 _ _ acc = return acc
 generarObstaculos n start end acc = do
-    rx <- randomRIO (8, 25) :: IO Int  -- Genera posición X aleatoria para el obstáculo
-    ry <- randomRIO (3, 18) :: IO Int  -- Genera posición Y aleatoria para el obstáculo
-    let pos = (rx, ry)  -- Crea la coordenada del obstáculo
-    if pos == start || pos == end || pos `elem` acc  -- Verifica si la posición es válida
-        then generarObstaculos n start end acc  -- Si no es válida, intenta generar otra
-        else generarObstaculos (n - 1) start end (pos : acc)  -- Agrega la posición y continúa
+    rx <- randomRIO (8, 25) :: IO Int
+    ry <- randomRIO (3, 18) :: IO Int -- Rango ajustado
+    let pos = (rx, ry)
+    if pos == start || pos == end || pos `elem` acc
+        then generarObstaculos n start end acc -- Reintentar si choca
+        else generarObstaculos (n - 1) start end (pos : acc)
 
--- Bucle principal del juego que maneja la entrada del usuario
 loop :: Juego -> IO ()
 loop estadoActual = do
-    linea <- getLine  -- Lee la línea de entrada del usuario
-    let partes = splitOn " " linea  -- Divide la línea en partes
+    linea <- getLine
+    let partes = splitOn " " linea
 
     case partes of
         ["RESET_PATH"] -> do
-            let nuevoEstado = limpiarCamino estadoActual  -- Limpia el camino dibujado
-            responder nuevoEstado  -- Responde con el nuevo estado
-            loop nuevoEstado  -- Continúa el bucle
+            let nuevoEstado = limpiarCamino estadoActual
+            responder nuevoEstado
+            loop nuevoEstado
 
         ["DIBUJAR", xStr, yStr] -> do
             case (readMaybe xStr, readMaybe yStr) of
                 (Just x, Just y) -> do
-                    let nuevoEstado = agregarDibujo (x, y) estadoActual  -- Agrega un nuevo punto al camino
-                    responder nuevoEstado  -- Responde con el nuevo estado
-                    loop nuevoEstado  -- Continúa el bucle
-                _ -> loop estadoActual  -- Si la entrada no es válida, continúa
+                    let nuevoEstado = agregarDibujo (x, y) estadoActual
+                    responder nuevoEstado
+                    loop nuevoEstado
+                _ -> loop estadoActual
 
         ["INICIAR"] -> do
-            let nuevoEstado = intentarIniciar estadoActual  -- Intenta iniciar el juego
-            responder nuevoEstado  -- Responde con el nuevo estado
-            loop nuevoEstado  -- Continúa el bucle
+            let nuevoEstado = intentarIniciar estadoActual
+            responder nuevoEstado
+            loop nuevoEstado
 
         ["TICK"] -> do
-            let nuevoEstado = avanzarCoche estadoActual  -- Avanza el coche en el juego
-            responder nuevoEstado  -- Responde con el nuevo estado
-            loop nuevoEstado  -- Continúa el bucle
+            let nuevoEstado = avanzarCoche estadoActual
+            responder nuevoEstado
+            loop nuevoEstado
+
+        -- COMANDOS NUEVOS PARA GESTIÓN DE NIVELES Y VIDAS --
 
         ["SIGUIENTE_NIVEL"] -> do
-            nuevoJuego <- generarNivel (nivelActual (estadoActual) + 1) (vidas estadoActual)  -- Genera el siguiente nivel
-            responder nuevoJuego  -- Responde con el nuevo estado
-            loop nuevoJuego  -- Continúa el bucle
+            -- Aumentar nivel, mantener vidas
+            nuevoJuego <- generarNivel (nivelActual (estadoActual) + 1) (vidas estadoActual)
+            responder nuevoJuego
+            loop nuevoJuego
 
         ["REINTENTAR_O_PERDER"] -> do
-            let vidasRestantes = vidas estadoActual - 1  -- Reduce el número de vidas
+            let vidasRestantes = vidas estadoActual - 1
             if vidasRestantes > 0
                 then do
-                    nuevoJuego <- generarNivel (nivelActual estadoActual) vidasRestantes  -- Genera un nuevo nivel con vidas restantes
-                    responder nuevoJuego  -- Responde con el nuevo estado
-                    loop nuevoJuego  -- Continúa el bucle
+                    -- Mismo nivel (o nuevo mapa del mismo nivel), una vida menos
+                    nuevoJuego <- generarNivel (nivelActual estadoActual) vidasRestantes
+                    responder nuevoJuego
+                    loop nuevoJuego
                 else do
-                    let juegoGameOver = estadoActual { estado = GameOver, vidas = 0 }  -- Cambia el estado a Game Over
-                    responder juegoGameOver  -- Responde con el nuevo estado
-                    loop juegoGameOver  -- Continúa el bucle
+                    -- Game Over: Enviamos estado especial
+                    let juegoGameOver = estadoActual { estado = GameOver, vidas = 0 }
+                    responder juegoGameOver
+                    loop juegoGameOver
 
         ["REINICIAR_COMPLETO"] -> do
-            juegoNuevo <- generarNivel 1 3  -- Reinicia el juego a nivel 1 con 3 vidas
-            responder juegoNuevo  -- Responde con el nuevo estado
-            loop juegoNuevo  -- Continúa el bucle
+            -- Volver a Nivel 1 con 3 vidas
+            juegoNuevo <- generarNivel 1 3
+            responder juegoNuevo
+            loop juegoNuevo
 
-        ["QUIT"] -> return ()  -- Sale del juego
-        _ -> loop estadoActual  -- Si el comando no es reconocido, continúa
+        ["QUIT"] -> return ()
+        _ -> loop estadoActual
 
--- Responde al cliente con el estado actual del juego en formato JSON
 responder :: Juego -> IO ()
 responder st = do
-    LBS.putStrLn $ encode st  -- Codifica el estado del juego a JSON y lo imprime
-    hFlush stdout  -- Asegura que la salida se muestre inmediatamente
+    LBS.putStrLn $ encode st
+    hFlush stdout

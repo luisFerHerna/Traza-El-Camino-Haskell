@@ -2,7 +2,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- Módulo principal del juego
 module Juego (
     Coord, Elemento(..), Nivel, EstadoJuego(..), Juego(..),
     crearJuego, avanzarCoche, agregarDibujo, intentarIniciar, limpiarCamino
@@ -12,34 +11,28 @@ import qualified Data.Map as Map
 import Data.Aeson
 import GHC.Generics
 
--- Tipo de coordenadas en el juego
 type Coord = (Int, Int)
 
--- Definición de los elementos que pueden aparecer en el nivel
 data Elemento = Carretera | Meta | Vacio | ObstaculoItem
     deriving (Eq, Show, Generic, ToJSON)
 
--- Estados posibles del juego
 data EstadoJuego = Dibujando | EnCurso | Caido | Ganado | Chocado | GameOver
     deriving (Eq, Show, Generic, ToJSON)
 
--- Mapa que representa el nivel del juego
 type Nivel = Map.Map Coord Elemento
 
--- Estructura que representa el estado del juego
 data Juego = Juego {
-    cochePos :: Coord,        -- Posición actual del coche
-    metaPos :: Coord,         -- Posición de la meta
-    obstaculos :: [Coord],    -- Lista de posiciones de obstáculos
-    nivel :: Nivel,           -- Mapa del nivel
-    estado :: EstadoJuego,    -- Estado actual del juego
-    caminoDibujado :: [Coord],-- Lista de coordenadas del camino dibujado
-    angulo :: Float,          -- Ángulo de dirección del coche
-    vidas :: Int,             -- Número de vidas del jugador
-    nivelActual :: Int        -- Nivel actual del juego
+    cochePos :: Coord,
+    metaPos :: Coord,
+    obstaculos :: [Coord],
+    nivel :: Nivel,
+    estado :: EstadoJuego,
+    caminoDibujado :: [Coord],
+    angulo :: Float,
+    vidas :: Int,
+    nivelActual :: Int
 } deriving (Show, Generic)
 
--- Conversión de la estructura Juego a formato JSON
 instance ToJSON Juego where
     toJSON juego = object
         [ "cochePos"       .= cochePos juego
@@ -53,7 +46,6 @@ instance ToJSON Juego where
         , "nivel"          .= Map.toList (nivel juego)
         ]
 
--- Función para crear un nuevo juego
 crearJuego :: Coord -> Coord -> [Coord] -> Int -> Int -> Juego
 crearJuego inicio meta obs nVidas nNivel =
     let mapaBase = Map.fromList ([(meta, Meta)] ++ [(o, ObstaculoItem) | o <- obs])
@@ -69,7 +61,6 @@ crearJuego inicio meta obs nVidas nNivel =
         nivelActual = nNivel
     }
 
--- Función para limpiar el camino dibujado y reiniciar el estado
 limpiarCamino :: Juego -> Juego
 limpiarCamino juego = juego {
     estado = Dibujando,
@@ -77,59 +68,51 @@ limpiarCamino juego = juego {
     angulo = 0.0
 }
 
--- Función para intentar iniciar el juego
 intentarIniciar :: Juego -> Juego
 intentarIniciar juego
-    | length (caminoDibujado juego) > 0 = juego { estado = EnCurso }  -- Cambia el estado a EnCurso si hay camino dibujado
-    | otherwise = juego  -- Mantiene el estado actual
+    | length (caminoDibujado juego) > 0 = juego { estado = EnCurso }
+    | otherwise = juego
 
--- Calcula el ángulo entre dos coordenadas
 calcularAngulo :: Coord -> Coord -> Float
 calcularAngulo (x1, y1) (x2, y2) =
     let dx = fromIntegral (x2 - x1)
         dy = fromIntegral (y2 - y1)
-        rados = atan2 dy dx  -- Calcula el ángulo en radianes
-    in rados * (180.0 / pi)  -- Convierte a grados
+        rados = atan2 dy dx
+    in rados * (180.0 / pi)
 
--- Verifica si dos coordenadas son adyacentes
 esAdyacente :: Coord -> Coord -> Bool
 esAdyacente (x1, y1) (x2, y2) = abs (x1 - x2) <= 1 && abs (y1 - y2) <= 1
 
--- Verifica si hay obstáculos cercanos a una coordenada
 obstaculosProximos :: Coord -> [Coord] -> Bool
 obstaculosProximos (x, y) obs =
-    let rango = [-2, -1, 0, 1, 2]  -- Rango de búsqueda
-        vecinos = [(x + dx, y + dy) | dx <- rango, dy <- rango]  -- Genera las coordenadas vecinas
-    in any (`elem` obs) vecinos  -- Verifica si hay obstáculos en las vecinas
+    let rango = [-2, -1, 0, 1, 2]
+        vecinos = [(x + dx, y + dy) | dx <- rango, dy <- rango]
+    in any (`elem` obs) vecinos
 
--- Verifica si el coche ha llegado a la meta
 llegoAMeta :: Coord -> Coord -> Bool
 llegoAMeta (x, y) (mx, my) = abs (x - mx) <= 1 && abs (y - my) <= 1
 
--- Función para avanzar el coche en el juego
 avanzarCoche :: Juego -> Juego
 avanzarCoche juego@(Juego {estado = EnCurso, caminoDibujado = camino, metaPos = meta, cochePos = actual, obstaculos = obs}) =
     case camino of
-        [] ->  -- Si no hay más camino
+        [] ->
             if llegoAMeta actual meta
-            then juego { estado = Ganado }  -- Si llegó a la meta, cambia el estado a Ganado
-            else juego { estado = Caido }  -- Si no, cambia el estado a Caido
+            then juego { estado = Ganado }
+            else juego { estado = Caido }
 
-        (siguientePos : restoCamino) ->  -- Si hay más posiciones en el camino
+        (siguientePos : restoCamino) ->
             if not (llegoAMeta siguientePos meta) && (siguientePos `elem` obs || obstaculosProximos siguientePos obs)
-            then juego { estado = Chocado, cochePos = siguientePos }  -- Si choca con un obstáculo
+            then juego { estado = Chocado, cochePos = siguientePos }
             else if not (esAdyacente actual siguientePos) && actual /= siguientePos
-            then juego { estado = Caido }  -- Si no se mueve a una posición adyacente, cae
+            then juego { estado = Caido }
             else
-                let nuevoAngulo = calcularAngulo actual siguientePos  -- Calcula el nuevo ángulo
+                let nuevoAngulo = calcularAngulo actual siguientePos
                 in if llegoAMeta siguientePos meta
-                   then juego { cochePos = siguientePos, caminoDibujado = [], estado = Ganado, angulo = nuevoAngulo }  -- Si llega a la meta
-                   else juego { cochePos = siguientePos, caminoDibujado = restoCamino, angulo = nuevoAngulo }  -- Actualiza la posición y el camino
+                   then juego { cochePos = siguientePos, caminoDibujado = [], estado = Ganado, angulo = nuevoAngulo }
+                   else juego { cochePos = siguientePos, caminoDibujado = restoCamino, angulo = nuevoAngulo }
 
--- Si el estado no es EnCurso, no se hace nada
 avanzarCoche juego = juego
 
--- Algoritmo de Bresenham para dibujar líneas entre dos coordenadas
 bresenham :: Coord -> Coord -> [Coord]
 bresenham (x0, y0) (x1, y1) =
     let dx = abs (x1 - x0)
@@ -140,20 +123,19 @@ bresenham (x0, y0) (x1, y1) =
     in (x0, y0) : paso x0 y0 err dx dy sx sy
   where
     paso x y e dx' dy' sx' sy'
-        | x == x1 && y == y1 = []  -- Si se llega al final, termina
+        | x == x1 && y == y1 = []
         | otherwise =
             let e2 = 2 * e
                 (nextX, e_x) = if e2 > -dy' then (x + sx', e - dy') else (x, e)
                 (nextY, e_y) = if e2 < dx' then (y + sy', e_x + dx') else (y, e_x)
             in (nextX, nextY) : paso nextX nextY e_y dx' dy' sx' sy'
 
--- Agrega un dibujo al camino del juego
 agregarDibujo :: Coord -> Juego -> Juego
 agregarDibujo coordDestino juego@(Juego {estado = Dibujando, caminoDibujado = camino})
-    | null camino = juego { caminoDibujado = [coordDestino] }  -- Si no hay camino, inicia uno nuevo
+    | null camino = juego { caminoDibujado = [coordDestino] }
     | otherwise =
-        let coordOrigen = last camino  -- Obtiene la última posición del camino
-            nuevosPuntos = bresenham coordOrigen coordDestino  -- Calcula los puntos intermedios
-            puntosAAnadir = if null nuevosPuntos then [] else tail nuevosPuntos  -- Excluye el origen
-        in juego { caminoDibujado = camino ++ puntosAAnadir }  -- Agrega los nuevos puntos al camino
-agregarDibujo _ juego = juego  -- Si el estado no es Dibujando, no se hace nada
+        let coordOrigen = last camino
+            nuevosPuntos = bresenham coordOrigen coordDestino
+            puntosAAnadir = if null nuevosPuntos then [] else tail nuevosPuntos
+        in juego { caminoDibujado = camino ++ puntosAAnadir }
+agregarDibujo _ juego = juego
