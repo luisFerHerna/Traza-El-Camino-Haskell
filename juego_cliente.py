@@ -10,7 +10,9 @@ TAMANO_CELDA = 25
 DURACION_FRAME = 80
 VELOCIDAD_CAIDA = 9
 
+# Colores
 COLOR_FONDO = (100, 215, 120)
+COLOR_GRILLA = (80, 180, 100)  # Color nuevo para la cuadrícula
 COLOR_CAMINO = (80, 80, 90)
 COLOR_UI_BG = (0, 0, 0, 150)
 COLOR_HITBOX_OBS = (255, 50, 50, 60)
@@ -94,6 +96,15 @@ def dibujar_hitbox_obstaculos(pantalla, obstaculos, meta):
 
 def dibujar_juego(estado_juego, frame_actual, offset_caida_y, juego_terminado_visualmente):
     pantalla.fill(COLOR_FONDO)
+
+    # --- DIBUJAR CUADRÍCULA (NUEVO) ---
+    # Líneas verticales
+    for x in range(0, ANCHO_VENTANA, TAMANO_CELDA):
+        pygame.draw.line(pantalla, COLOR_GRILLA, (x, 0), (x, ALTO_VENTANA), 1)
+    # Líneas horizontales
+    for y in range(0, ALTO_VENTANA, TAMANO_CELDA):
+        pygame.draw.line(pantalla, COLOR_GRILLA, (0, y), (ANCHO_VENTANA, y), 1)
+    # ----------------------------------
 
     camino = estado_juego.get('caminoDibujado', [])
     for (cx, cy) in camino:
@@ -264,7 +275,7 @@ def main():
                         offset_caida_y = 0
                         juego_terminado_visualmente = False
                         estado_anterior = ""
-                        estado_logico = estado_actual.get('estado') # ACTUALIZAR AQUI TAMBIEN
+                        estado_logico = estado_actual.get('estado')
                      except: corriendo = False
 
                 elif evento.key == pygame.K_SPACE:
@@ -282,10 +293,6 @@ def main():
                                 proc.stdin.write("REINTENTAR_O_PERDER\n")
 
                             estado_actual = json.loads(proc.stdout.readline())
-
-                            # --- CORRECCIÓN CRÍTICA ---
-                            # Actualizamos 'estado_logico' inmediatamente con el nuevo estado ('Dibujando')
-                            # para que la lógica de abajo NO piense que seguimos chocados/caídos.
                             estado_logico = estado_actual.get('estado')
 
                         except: corriendo = False
