@@ -8,9 +8,13 @@ module Juego (
 ) where
 
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Aeson
 import GHC.Generics
 
+-- ============================================================================
+-- TIPOS DE DATOS
+-- ============================================================================
 type Coord = (Int, Int)
 
 data Elemento = Carretera | Meta | Vacio | ObstaculoItem
@@ -30,7 +34,8 @@ data Juego = Juego {
     caminoDibujado :: [Coord],
     angulo :: Float,
     vidas :: Int,
-    nivelActual :: Int
+    nivelActual :: Int,
+    distanciaMinima :: Int  -- CAMPO NUEVO: La distancia óptima calculada
 } deriving (Show, Generic)
 
 instance ToJSON Juego where
@@ -43,12 +48,41 @@ instance ToJSON Juego where
         , "angulo"         .= angulo juego
         , "vidas"          .= vidas juego
         , "nivelActual"    .= nivelActual juego
+        , "distanciaMinima".= distanciaMinima juego
         , "nivel"          .= Map.toList (nivel juego)
         ]
 
+-- ============================================================================
+-- ALGORITMO BFS (Búsqueda en Anchura)
+-- Calcula la ruta matemática más corta evitando obstáculos
+-- ============================================================================
+bfs :: Coord -> Coord -> [Coord] -> Int
+bfs start end obs = bfs' (Set.singleton start) [(start, 0)]
+  where
+    obsSet = Set.fromList obs
+    
+    bfs' _ [] = 100 -- Valor de seguridad si no hay camino
+    bfs' visited ((curr, dist):queue)
+        | curr == end = dist
+        | otherwise = 
+            let neighbors = [ (r, c) | (r, c) <- [(fst curr + 1, snd curr), (fst curr - 1, snd curr), 
+                                                  (fst curr, snd curr + 1), (fst curr, snd curr - 1)]
+                            , r >= 0, r < 40, c >= 0, c < 30 -- Límites aproximados seguros
+                            , not (Set.member (r, c) visited)
+                            , not (Set.member (r, c) obsSet)
+                            ]
+                newVisited = foldr Set.insert visited neighbors
+                newQueue = queue ++ map (\n -> (n, dist + 1)) neighbors
+            in bfs' newVisited newQueue
+
+-- ============================================================================
+-- CREACIÓN DEL JUEGO
+-- ============================================================================
 crearJuego :: Coord -> Coord -> [Coord] -> Int -> Int -> Juego
 crearJuego inicio meta obs nVidas nNivel =
     let mapaBase = Map.fromList ([(meta, Meta)] ++ [(o, ObstaculoItem) | o <- obs])
+        -- Aquí la IA calcula el camino perfecto antes de empezar
+        distOptima = bfs inicio meta obs
     in Juego {
         cochePos = inicio,
         metaPos = meta,
@@ -58,13 +92,17 @@ crearJuego inicio meta obs nVidas nNivel =
         caminoDibujado = [inicio],
         angulo = 0.0,
         vidas = nVidas,
-        nivelActual = nNivel
+        nivelActual = nNivel,
+        distanciaMinima = distOptima
     }
 
+-- ============================================================================
+-- LÓGICA DEL JUEGO
+-- ============================================================================
 limpiarCamino :: Juego -> Juego
 limpiarCamino juego = juego {
     estado = Dibujando,
-    caminoDibujado = [],
+    caminoDibujado = [], 
     angulo = 0.0
 }
 
@@ -77,16 +115,14 @@ calcularAngulo :: Coord -> Coord -> Float
 calcularAngulo (x1, y1) (x2, y2) =
     let dx = fromIntegral (x2 - x1)
         dy = fromIntegral (y2 - y1)
-        rados = atan2 dy dx
-    in rados * (180.0 / pi)
+    in atan2 dy dx * (180.0 / pi)
 
 esAdyacente :: Coord -> Coord -> Bool
 esAdyacente (x1, y1) (x2, y2) = abs (x1 - x2) <= 1 && abs (y1 - y2) <= 1
 
 obstaculosProximos :: Coord -> [Coord] -> Bool
 obstaculosProximos (x, y) obs =
-    let rango = [-2, -1, 0, 1, 2]
-        vecinos = [(x + dx, y + dy) | dx <- rango, dy <- rango]
+    let vecinos = [(x + dx, y + dy) | dx <- [-2..2], dy <- [-2..2]]
     in any (`elem` obs) vecinos
 
 llegoAMeta :: Coord -> Coord -> Bool
@@ -95,11 +131,7 @@ llegoAMeta (x, y) (mx, my) = abs (x - mx) <= 1 && abs (y - my) <= 1
 avanzarCoche :: Juego -> Juego
 avanzarCoche juego@(Juego {estado = EnCurso, caminoDibujado = camino, metaPos = meta, cochePos = actual, obstaculos = obs}) =
     case camino of
-        [] ->
-            if llegoAMeta actual meta
-            then juego { estado = Ganado }
-            else juego { estado = Caido }
-
+        [] -> if llegoAMeta actual meta then juego { estado = Ganado } else juego { estado = Caido }
         (siguientePos : restoCamino) ->
             if not (llegoAMeta siguientePos meta) && (siguientePos `elem` obs || obstaculosProximos siguientePos obs)
             then juego { estado = Chocado, cochePos = siguientePos }
@@ -110,15 +142,13 @@ avanzarCoche juego@(Juego {estado = EnCurso, caminoDibujado = camino, metaPos = 
                 in if llegoAMeta siguientePos meta
                    then juego { cochePos = siguientePos, caminoDibujado = [], estado = Ganado, angulo = nuevoAngulo }
                    else juego { cochePos = siguientePos, caminoDibujado = restoCamino, angulo = nuevoAngulo }
-
 avanzarCoche juego = juego
 
+-- Bresenham para dibujo suave
 bresenham :: Coord -> Coord -> [Coord]
 bresenham (x0, y0) (x1, y1) =
-    let dx = abs (x1 - x0)
-        dy = abs (y1 - y0)
-        sx = signum (x1 - x0)
-        sy = signum (y1 - y0)
+    let dx = abs (x1 - x0); dy = abs (y1 - y0)
+        sx = signum (x1 - x0); sy = signum (y1 - y0)
         err = dx - dy
     in (x0, y0) : paso x0 y0 err dx dy sx sy
   where
